@@ -1,0 +1,78 @@
+import numpy as np
+import pandas as pd
+import torch
+import gpytorch
+from matplotlib import pyplot as plt
+
+# Ensure CUDA is available and set as the default device
+if not torch.cuda.is_available():
+    raise SystemError("CUDA is not available. This code requires a GPU.")
+torch.cuda.set_device(0)  # Set to the default CUDA device
+
+device = torch.device('cuda:0')
+
+# Load data
+data_path = '/kaggle/input/my-astthicker/AST_Thicker_ALL.csv'  # Adjust the path accordingly
+data = pd.read_csv(data_path)
+
+# Use real data without normalization
+X = torch.tensor(data['time_AST'].values, dtype=torch.float32).view(-1, 1).to(device)
+y = torch.tensor(data['voltage_AST'].values, dtype=torch.float32).to(device)
+
+# Define a simple GP Model
+class SimpleGPModel(gpytorch.models.ExactGP):
+    def __init__(self, train_x, train_y, likelihood):
+        super(SimpleGPModel, self).__init__(train_x, train_y, likelihood)
+        self.mean_module = gpytorch.means.ConstantMean()
+        self.covar_module = gpytorch.kernels.ScaleKernel(gpytorch.kernels.RBFKernel())
+    
+    def forward(self, x):
+        mean_x = self.mean_module(x)
+        covar_x = self.covar_module(x)
+        return gpytorch.distributions.MultivariateNormal(mean_x, covar_x)
+
+# Initialize the model and likelihood
+likelihood = gpytorch.likelihoods.GaussianLikelihood().to(device)
+model = SimpleGPModel(X, y, likelihood).to(device)
+
+# Model training
+model.train()
+likelihood.train()
+
+# Use the Adam optimizer
+optimizer = torch.optim.Adam(model.parameters(), lr=0.1)
+
+# "Loss" for GPs - the marginal log likelihood
+mll = gpytorch.mlls.ExactMarginalLogLikelihood(likelihood, model)
+
+def train():
+    for i in range(50):
+        optimizer.zero_grad()
+        output = model(X)
+        loss = -mll(output, y)
+        loss.backward()
+        optimizer.step()
+        if i % 10 == 0:
+            print(f"Iter {i} - Loss: {loss.item()}")
+
+train()
+
+# Switch to evaluation mode
+model.eval()
+likelihood.eval()
+
+# Make predictions up to a time limit of 27.3
+with torch.no_grad(), gpytorch.settings.fast_pred_var():
+    max_time_value = 27.3  # Set the maximum time limit to 27.3
+    test_x = torch.linspace(X.min(), torch.tensor(max_time_value).to(device), 1000).view(-1, 1).to(device)
+    observed_pred = likelihood(model(test_x))
+
+# Plot
+with torch.no_grad():
+    f, ax = plt.subplots(1, 1, figsize=(12, 6))
+    lower, upper = observed_pred.confidence_region()
+    ax.plot(X.cpu().numpy(), y.cpu().numpy(), 'k*', alpha=0.5, markersize=4)
+    ax.fill_between(test_x.cpu().numpy().flatten(), lower.cpu().numpy(), upper.cpu().numpy(), alpha=0.5)
+    ax.plot(test_x.cpu().numpy(), observed_pred.mean.cpu().numpy(), 'b')
+    ax.legend(['Observations', 'Confidence', 'Mean Prediction'])
+    plt.show()

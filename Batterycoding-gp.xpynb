@@ -12,7 +12,7 @@ torch.cuda.set_device(0)  # Set to the default CUDA device
 device = torch.device('cuda:0')
 
 # Load data
-data_path = '/kaggle/input/my-astthicker/AST_Thicker_ALL.csv'  # Adjust the path accordingly
+data_path = '/input/my-astthicker/AST_Thicker_ALL.csv'  # Adjust the path accordingly
 data = pd.read_csv(data_path)
 
 # Use real data without normalization
